@@ -2,12 +2,12 @@ name: Skaradag Haftalik BIST Taramasi
 
 on:
   schedule:
-    # Her Cuma UTC 15:30 (Türkiye Saati ile Cuma 18:30)
-    - cron: '30 15 * * 5'
+    # Hafta içi her gün UTC 15:45 (TSİ 18:45 - Akşam Kapanış Taraması)
+    - cron: '45 15 * * 1-5'
   workflow_dispatch:
 
 jobs:
-  run-scanner:
+  run-weekly-scanner:
     runs-on: ubuntu-latest
 
     steps:
@@ -24,7 +24,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Skaradag Taramasını Çalıştır
+      - name: Haftalık Skaradag Taramasını Çalıştır
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}

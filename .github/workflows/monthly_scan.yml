@@ -1,0 +1,31 @@
+name: Skaradag Aylik BIST Taramasi
+
+on:
+  schedule:
+    # Her ayın 1'inde UTC 02:00 (Türkiye saati ile Sabah 05:00)
+    - cron: '0 2 1 * *'
+  workflow_dispatch: # İstenildiği an elle de çalıştırılabilmesi için
+
+jobs:
+  run-monthly-scanner:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Depoyu Klonla
+        uses: actions/checkout@v4
+
+      - name: Python Kurulumu
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Paketleri Yükle
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Aylık Skaradag Taramasını Çalıştır
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python skaradag_monthly_scanner.py

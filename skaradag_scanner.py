@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import requests
 
+# --- 1. TELEGRAM BİLDİRİM FONKSİYONU ---
 def send_telegram_message(message):
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
@@ -20,10 +21,11 @@ def send_telegram_message(message):
     }
     try:
         requests.post(url, json=payload)
-        print("Haftalık Telegram bildirimi gönderildi.")
+        print("Aylık Telegram bildirimi gönderildi.")
     except Exception as e:
         print(f"Telegram mesajı gönderilirken hata: {e}")
 
+# --- 2. TRADINGVIEW BİREBİR SKARADAG HESAPLAMASI ---
 def calculate_tema(series, length=16):
     ema1 = series.ewm(span=length, adjust=False).mean()
     ema2 = ema1.ewm(span=length, adjust=False).mean()
@@ -60,6 +62,7 @@ def calculate_skaradag(df, avg1=16, avg2=16):
 
     return zl_cl, zl_ha
 
+# --- 3. XU100 VE ENDEKS LİSTESİ ---
 def get_bist100_symbols():
     try:
         url = "https://tr.wikipedia.org/wiki/BIST_100"
@@ -77,46 +80,66 @@ def get_bist100_symbols():
     endeksler = ["XU100.IS", "XU030.IS"]
     return endeksler + [s for s in symbols if s not in endeksler]
 
+# --- 4. TARAMA MOTORU (MÜKEMMEL TAZE KESİŞİM FİLTRESİ) ---
 symbols = get_bist100_symbols()
 al_listesi = []
 sat_listesi = []
 
 for symbol in symbols:
     try:
-        data = yf.download(symbol, period="2y", interval="1wk", progress=False)
-        if len(data) < 30:
+        df_daily = yf.download(symbol, period="5y", interval="1d", auto_adjust=False, progress=False)
+        if len(df_daily) < 100:
             continue
-        
-        if isinstance(data.columns, pd.MultiIndex):
-            data.columns = data.columns.get_level_values(0)
+            
+        if isinstance(df_daily.columns, pd.MultiIndex):
+            df_daily.columns = df_daily.columns.get_level_values(0)
+
+        # Günlük veriyi Aylık (Month-End) barlara birleştiriyoruz
+        data = df_daily.resample('ME').agg({
+            'Open': 'first',
+            'High': 'max',
+            'Low': 'min',
+            'Close': 'last',
+            'Volume': 'sum'
+        }).dropna()
+
+        # Henüz tamamlanmamış içinde bulunduğumuz ayı dışarıda bırakıyoruz
+        if len(data) > 1:
+            data = data.iloc[:-1]
+
+        if len(data) < 20:
+            continue
 
         zl_cl, zl_ha = calculate_skaradag(data)
 
-        prev_cl, curr_cl = zl_cl.iloc[-2], zl_cl.iloc[-1]
-        prev_ha, curr_ha = zl_ha.iloc[-2], zl_ha.iloc[-1]
+        # TAZE KESİŞİM MATEMATİĞİ (CROSSOVER / CROSSUNDER)
+        # Önceki bar (t-1) ve Şimdiki bar (t)
+        zl_cl_prev = zl_cl.shift(1)
+        zl_ha_prev = zl_ha.shift(1)
+
+        # Sadece son tamamlanan barda gerçekleşen taze kırılım
+        buy_cross = (zl_cl_prev <= zl_ha_prev) & (zl_cl > zl_ha)
+        sell_cross = (zl_cl_prev >= zl_ha_prev) & (zl_cl < zl_ha)
 
         clean_symbol = symbol.replace(".IS", "")
 
-        # KESİN NET ÇAPRAZ KESİŞİM (TEMASLAR VE EŞİTLİKLER ELENDİ)
-        is_new_buy = (prev_cl < prev_ha) and (curr_cl > curr_ha)
-        is_new_sell = (prev_cl > prev_ha) and (curr_cl < curr_ha)
-
-        if is_new_buy:
+        if buy_cross.iloc[-1]:
             al_listesi.append(clean_symbol)
-        elif is_new_sell:
+        elif sell_cross.iloc[-1]:
             sat_listesi.append(clean_symbol)
 
     except Exception as e:
         print(f"{symbol} hata: {e}")
 
+# --- 5. TELEGRAM MESAJ FORMATI VE GÖNDERİMİ ---
 al_str = ", ".join(al_listesi) if al_listesi else "Yok"
 sat_str = ", ".join(sat_listesi) if sat_listesi else "Yok"
 
 message = (
-    "📊 *HAFTALIK SKARADAG BİST TARAMASI*\n"
-    "_(Net Taze Kesişim Verenler)_\n\n"
-    f"🟢 *HAFTALIK AL Verenler ({len(al_listesi)}):*\n`{al_str}`\n\n"
-    f"🔴 *HAFTALIK SAT Verenler ({len(sat_listesi)}):*\n`{sat_str}`"
+    "📅 *AYLIK SKARADAG BİST TARAMASI*\n"
+    "_(Sadece Sinyalin Geldiği İlk Bar - Taze Kesişim)_\n\n"
+    f"🟢 *AYLIK AL Verenler ({len(al_listesi)}):*\n`{al_str}`\n\n"
+    f"🔴 *AYLIK SAT Verenler ({len(sat_listesi)}):*\n`{sat_str}`"
 )
 
 send_telegram_message(message)

@@ -3,7 +3,9 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import requests
+from datetime import datetime
 
+# --- 1. TELEGRAM BİLDİRİM FONKSİYONU ---
 def send_telegram_message(message):
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
@@ -24,6 +26,7 @@ def send_telegram_message(message):
     except Exception as e:
         print(f"Telegram mesajı gönderilirken hata: {e}")
 
+# --- 2. TRADINGVIEW BİREBİR SKARADAG HESAPLAMASI ---
 def calculate_tema(series, length=16):
     ema1 = series.ewm(span=length, adjust=False).mean()
     ema2 = ema1.ewm(span=length, adjust=False).mean()
@@ -60,6 +63,7 @@ def calculate_skaradag(df, avg1=16, avg2=16):
 
     return zl_cl, zl_ha
 
+# --- 3. XU100 VE ENDEKS LİSTESİ ---
 def get_bist100_symbols():
     try:
         url = "https://tr.wikipedia.org/wiki/BIST_100"
@@ -77,48 +81,40 @@ def get_bist100_symbols():
     endeksler = ["XU100.IS", "XU030.IS"]
     return endeksler + [s for s in symbols if s not in endeksler]
 
+# --- 4. TARAMA MOTORU ---
 symbols = get_bist100_symbols()
 al_listesi = []
 sat_listesi = []
 
+# Şu anki ayın 1'i (İçinde bulunduğumuz tamamlanmamış ayı filtrelemek için)
+first_day_of_current_month = pd.Timestamp(datetime.now().year, datetime.now().month, 1)
+
 for symbol in symbols:
     try:
-        df_daily = yf.download(symbol, period="5y", interval="1d", auto_adjust=False, progress=False)
-        if len(df_daily) < 100:
+        # Hassasiyet için 10 Yıllık veri çekiyoruz
+        data = yf.download(symbol, period="10y", interval="1mo", auto_adjust=False, progress=False)
+        if len(data) < 30:
             continue
-            
-        if isinstance(df_daily.columns, pd.MultiIndex):
-            df_daily.columns = df_daily.columns.get_level_values(0)
+        
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = data.columns.get_level_values(0)
 
-        # Günlük veriyi Aylık (ME) barlara birleştiriyoruz
-        data = df_daily.resample('ME').agg({
-            'Open': 'first',
-            'High': 'max',
-            'Low': 'min',
-            'Close': 'last',
-            'Volume': 'sum'
-        }).dropna()
-
-        # Ekim ayının ilk günündeyiz; canlı ayı kaldırıyoruz
-        if len(data) > 1:
-            data = data.iloc[:-1]
+        # Tarih filtresi: SADECE bu aydan ÖNCE kapanmış olan tamamlanmış ayları alıyoruz
+        # Böylece canlı/eksik barlar elenir, endeks-hisse tarih uyuşmazlığı tamamen biter.
+        data = data[data.index < first_day_of_current_month]
 
         if len(data) < 20:
             continue
 
         zl_cl, zl_ha = calculate_skaradag(data)
 
-        # SADECE SON TAMAMLANAN AY (Eylül) İLE ONDAN ÖNCEKİ AYIN (Ağustos) KIYASI
-        # prev_cl / prev_ha  -> Ağustos Kapanış Değerleri
-        # curr_cl / curr_ha  -> Eylül Kapanış Değerleri
+        # En son tamamlanan ay ve ondan bir önceki ay
         prev_cl, curr_cl = zl_cl.iloc[-2], zl_cl.iloc[-1]
         prev_ha, curr_ha = zl_ha.iloc[-2], zl_ha.iloc[-1]
 
         clean_symbol = symbol.replace(".IS", "")
 
-        # EREGL Ağustos'ta kestiği için Ağustos ayında (prev) zaten sarı kırmızının ALTINDAYDI.
-        # Eylül ayında (curr) da ALTINDA kalmaya devam etti.
-        # Dolayısıyla prev_cl > prev_ha şartı SAĞLANMAYACAK ve EREGL elenecektir.
+        # SADECE O AYDA İLK DEFA TAZE KESİŞENLER
         is_new_buy = (prev_cl <= prev_ha) and (curr_cl > curr_ha)
         is_new_sell = (prev_cl >= prev_ha) and (curr_cl < curr_ha)
 
@@ -130,12 +126,13 @@ for symbol in symbols:
     except Exception as e:
         print(f"{symbol} hata: {e}")
 
+# --- 5. TELEGRAM MESAJ FORMATI VE GÖNDERİMİ ---
 al_str = ", ".join(al_listesi) if al_listesi else "Yok"
 sat_str = ", ".join(sat_listesi) if sat_listesi else "Yok"
 
 message = (
     "📅 *AYLIK SKARADAG BİST TARAMASI*\n"
-    "_(Net Taze Kesişim Verenler)_\n\n"
+    "_(Tam Kapanmış Ay - Taze Kesişimler)_\n\n"
     f"🟢 *AYLIK AL Verenler ({len(al_listesi)}):*\n`{al_str}`\n\n"
     f"🔴 *AYLIK SAT Verenler ({len(sat_listesi)}):*\n`{sat_str}`"
 )

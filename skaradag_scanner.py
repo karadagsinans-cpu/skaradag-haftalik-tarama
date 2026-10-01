@@ -1,9 +1,31 @@
+import os
 import yfinance as yf
 import pandas as pd
 import numpy as np
 import requests
 
-# --- 1. SKARADAG MATEMATİKSEL FONKSİYONLARI ---
+# --- 1. TELEGRAM BİLDİRİM FONKSİYONU ---
+def send_telegram_message(message):
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    
+    if not bot_token or not chat_id:
+        print("Telegram kimlik bilgileri bulunamadı, mesaj gönderilmedi.")
+        return
+
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": message,
+        "parse_mode": "Markdown"
+    }
+    try:
+        requests.post(url, json=payload)
+        print("Telegram bildirimi başarıyla gönderildi.")
+    except Exception as e:
+        print(f"Telegram mesajı gönderilirken hata oluştu: {e}")
+
+# --- 2. SKARADAG MATEMATİKSEL FONKSİYONLARI ---
 def calculate_tema(series, length=16):
     ema1 = series.ewm(span=length, adjust=False).mean()
     ema2 = ema1.ewm(span=length, adjust=False).mean()
@@ -11,14 +33,12 @@ def calculate_tema(series, length=16):
     return 3 * (ema1 - ema2) + ema3
 
 def calculate_skaradag(df, avg1=16, avg2=16):
-    # Skaradag1 (Typical Price Tabanlı Zero-Lag TEMA)
     typical_price = (df['High'] + df['Low'] + df['Close']) / 3
     tma1_1 = calculate_tema(typical_price, avg1)
     tma2_1 = calculate_tema(tma1_1, avg1)
     diff1 = tma1_1 - tma2_1
     zl_cl = tma1_1 + diff1 
 
-    # Skaradag2 (Heikin Ashi Tabanlı Zero-Lag TEMA)
     ha_open = pd.Series(index=df.index, dtype=float)
     ha_open.iloc[0] = (df['Open'].iloc[0] + df['High'].iloc[0] + df['Low'].iloc[0] + df['Close'].iloc[0]) / 4
     
@@ -37,36 +57,28 @@ def calculate_skaradag(df, avg1=16, avg2=16):
 
     return zl_cl, zl_ha
 
-# --- 2. XU100 HİSSE LİSTESİNİ OTOMATİK ÇEKME VE ENDEKSLERİ EKLEME ---
+# --- 3. XU100 VE ENDEKS LİSTESİ ---
 def get_bist100_symbols():
     try:
         url = "https://tr.wikipedia.org/wiki/BIST_100"
         tables = pd.read_html(url)
-        
-        # Wikipedia tablosundan sembolleri ayıklama
         df_bist = None
         for table in tables:
             if 'Kod' in table.columns or 'Simge' in table.columns:
                 df_bist = table
                 break
-        
         col_name = 'Kod' if 'Kod' in df_bist.columns else 'Simge'
         symbols = [str(code).strip() + ".IS" for code in df_bist[col_name].dropna().tolist()]
     except Exception as e:
-        print(f"Canlı BIST100 listesi çekilemedi, varsayılan liste kullanılıyor: {e}")
         symbols = ["THYAO.IS", "ASELS.IS", "GARAN.IS", "AKBNK.IS", "EREGL.IS", "TUPRS.IS", "BIMAS.IS", "KCHOL.IS", "SISE.IS", "SAHOL.IS"]
 
-    # Endeksleri listenin başına ekliyoruz
     endeksler = ["XU100.IS", "XU030.IS"]
-    all_symbols = endeksler + [s for s in symbols if s not in endeksler]
-    return all_symbols
+    return endeksler + [s for s in symbols if s not in endeksler]
 
-# --- 3. TARAMA MOTORU ---
+# --- 4. TARAMA MOTORU ---
 symbols = get_bist100_symbols()
 al_listesi = []
 sat_listesi = []
-
-print(f"Toplam {len(symbols)} sembol için Haftalık Skaradag Taraması Başlatılıyor...\n")
 
 for symbol in symbols:
     try:
@@ -84,22 +96,22 @@ for symbol in symbols:
 
         clean_symbol = symbol.replace(".IS", "")
 
-        # AL Şartı: Skaradag1 (ZlCl) Skaradag2'yi (ZlHa) YUKARI KESTİ
         if prev_cl <= prev_ha and curr_cl > curr_ha:
             al_listesi.append(clean_symbol)
-
-        # SAT Şartı: Skaradag1 (ZlCl) Skaradag2'yi (ZlHa) AŞAĞI KESTİ
         elif prev_cl >= prev_ha and curr_cl < curr_ha:
             sat_listesi.append(clean_symbol)
 
     except Exception as e:
-        print(f"{symbol} taranırken hata: {e}")
+        print(f"{symbol} hata: {e}")
 
-# --- 4. SONUÇ RAPORU ---
-print("="*50)
-print(f"HAFTALIK AL VERENLER ({len(al_listesi)} Adet):")
-print(", ".join(al_listesi) if al_listesi else "Yok")
-print("="*50)
-print(f"HAFTALIK SAT VERENLER ({len(sat_listesi)} Adet):")
-print(", ".join(sat_listesi) if sat_listesi else "Yok")
-print("="*50)
+# --- 5. TELEGRAM MESAJ FORMATI VE GÖNDERİMİ ---
+al_str = ", ".join(al_listesi) if al_listesi else "Yok"
+sat_str = ", ".join(sat_listesi) if sat_listesi else "Yok"
+
+message = (
+    "📊 *HAFTALIK SKARADAG BİST TARAMASI*\n\n"
+    f"🟢 *AL Verenler ({len(al_listesi)}):*\n`{al_str}`\n\n"
+    f"🔴 *SAT Verenler ({len(sat_listesi)}):*\n`{sat_str}`"
+)
+
+send_telegram_message(message)

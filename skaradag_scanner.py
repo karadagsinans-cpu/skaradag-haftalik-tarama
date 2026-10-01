@@ -21,11 +21,11 @@ def send_telegram_message(message):
     }
     try:
         requests.post(url, json=payload)
-        print("Telegram bildirimi başarıyla gönderildi.")
+        print("Haftalık Telegram bildirimi gönderildi.")
     except Exception as e:
-        print(f"Telegram mesajı gönderilirken hata oluştu: {e}")
+        print(f"Telegram mesajı gönderilirken hata: {e}")
 
-# --- 2. SKARADAG MATEMATİKSEL FONKSİYONLARI ---
+# --- 2. TRADINGVIEW BİREBİR SKARADAG HESAPLAMASI ---
 def calculate_tema(series, length=16):
     ema1 = series.ewm(span=length, adjust=False).mean()
     ema2 = ema1.ewm(span=length, adjust=False).mean()
@@ -33,27 +33,34 @@ def calculate_tema(series, length=16):
     return 3 * (ema1 - ema2) + ema3
 
 def calculate_skaradag(df, avg1=16, avg2=16):
+    # Skaradag1 (Typical Price Tabanlı ZL-TEMA)
     typical_price = (df['High'] + df['Low'] + df['Close']) / 3
     tma1_1 = calculate_tema(typical_price, avg1)
     tma2_1 = calculate_tema(tma1_1, avg1)
-    diff1 = tma1_1 - tma2_1
-    zl_cl = tma1_1 + diff1 
+    zl_cl = 2 * tma1_1 - tma2_1
 
-    ha_open = pd.Series(index=df.index, dtype=float)
-    ha_open.iloc[0] = (df['Open'].iloc[0] + df['High'].iloc[0] + df['Low'].iloc[0] + df['Close'].iloc[0]) / 4
+    # Skaradag2 (TradingView Heikin Ashi Birebir Hesaplaması)
+    o = df['Open'].values
+    h = df['High'].values
+    l = df['Low'].values
+    c = df['Close'].values
+    n = len(df)
+
+    ha_close = (o + h + l + c) / 4.0
+    ha_open = np.zeros(n)
+    ha_open[0] = (o[0] + c[0]) / 2.0
+
+    for i in range(1, n):
+        ha_open[i] = (ha_open[i-1] + ha_close[i-1]) / 2.0
+
+    ha_high = np.maximum(h, np.maximum(ha_open, ha_close))
+    ha_low = np.minimum(l, np.minimum(ha_open, ha_close))
     
-    for i in range(1, len(df)):
-        ha_open.iloc[i] = (ha_open.iloc[i-1] + ((df['Open'].iloc[i] + df['High'].iloc[i] + df['Low'].iloc[i] + df['Close'].iloc[i]) / 4)) / 2
-        
-    ha_c = ((df['Open'] + df['High'] + df['Low'] + df['Close']) / 4 + 
-            ha_open + 
-            np.maximum(df['High'], ha_open) + 
-            np.minimum(df['Low'], ha_open)) / 4
+    ha_c_series = pd.Series((ha_close + ha_open + ha_high + ha_low) / 4.0, index=df.index)
 
-    tma1_2 = calculate_tema(ha_c, avg2)
+    tma1_2 = calculate_tema(ha_c_series, avg2)
     tma2_2 = calculate_tema(tma1_2, avg2)
-    diff2 = tma1_2 - tma2_2
-    zl_ha = tma1_2 + diff2
+    zl_ha = 2 * tma1_2 - tma2_2
 
     return zl_cl, zl_ha
 
@@ -75,7 +82,7 @@ def get_bist100_symbols():
     endeksler = ["XU100.IS", "XU030.IS"]
     return endeksler + [s for s in symbols if s not in endeksler]
 
-# --- 4. TARAMA MOTORU ---
+# --- 4. TARAMA MOTORU (HAFTALIK - TAZE KESİŞİM) ---
 symbols = get_bist100_symbols()
 al_listesi = []
 sat_listesi = []
@@ -96,9 +103,13 @@ for symbol in symbols:
 
         clean_symbol = symbol.replace(".IS", "")
 
-        if prev_cl <= prev_ha and curr_cl > curr_ha:
+        # SADECE O HAFTALIK BARDA İLK DEFA ÇAPRAZ KESENLER
+        is_new_buy = (prev_cl <= prev_ha) and (curr_cl > curr_ha)
+        is_new_sell = (prev_cl >= prev_ha) and (curr_cl < curr_ha)
+
+        if is_new_buy:
             al_listesi.append(clean_symbol)
-        elif prev_cl >= prev_ha and curr_cl < curr_ha:
+        elif is_new_sell:
             sat_listesi.append(clean_symbol)
 
     except Exception as e:
@@ -109,9 +120,10 @@ al_str = ", ".join(al_listesi) if al_listesi else "Yok"
 sat_str = ", ".join(sat_listesi) if sat_listesi else "Yok"
 
 message = (
-    "📊 *HAFTALIK SKARADAG BİST TARAMASI*\n\n"
-    f"🟢 *AL Verenler ({len(al_listesi)}):*\n`{al_str}`\n\n"
-    f"🔴 *SAT Verenler ({len(sat_listesi)}):*\n`{sat_str}`"
+    "📊 *HAFTALIK SKARADAG BİST TARAMASI*\n"
+    "_(Taze Kesişim Verenler)_\n\n"
+    f"🟢 *HAFTALIK AL Verenler ({len(al_listesi)}):*\n`{al_str}`\n\n"
+    f"🔴 *HAFTALIK SAT Verenler ({len(sat_listesi)}):*\n`{sat_str}`"
 )
 
 send_telegram_message(message)

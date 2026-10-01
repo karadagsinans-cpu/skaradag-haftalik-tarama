@@ -83,7 +83,6 @@ sat_listesi = []
 
 for symbol in symbols:
     try:
-        # Günlük veri çekip aylık mumlara (Resample) çeviriyoruz (TradingView birebir uyum için)
         df_daily = yf.download(symbol, period="5y", interval="1d", auto_adjust=False, progress=False)
         if len(df_daily) < 100:
             continue
@@ -91,7 +90,8 @@ for symbol in symbols:
         if isinstance(df_daily.columns, pd.MultiIndex):
             df_daily.columns = df_daily.columns.get_level_values(0)
 
-        data = df_daily.resample('M').agg({
+        # Günlük veriyi Aylık (ME) barlara birleştiriyoruz
+        data = df_daily.resample('ME').agg({
             'Open': 'first',
             'High': 'max',
             'Low': 'min',
@@ -99,7 +99,7 @@ for symbol in symbols:
             'Volume': 'sum'
         }).dropna()
 
-        # Devam eden henüz kapanmamış içinde bulunduğumuz ayı çıkarıyoruz
+        # Ekim ayının ilk günündeyiz; canlı ayı kaldırıyoruz
         if len(data) > 1:
             data = data.iloc[:-1]
 
@@ -108,13 +108,19 @@ for symbol in symbols:
 
         zl_cl, zl_ha = calculate_skaradag(data)
 
+        # SADECE SON TAMAMLANAN AY (Eylül) İLE ONDAN ÖNCEKİ AYIN (Ağustos) KIYASI
+        # prev_cl / prev_ha  -> Ağustos Kapanış Değerleri
+        # curr_cl / curr_ha  -> Eylül Kapanış Değerleri
         prev_cl, curr_cl = zl_cl.iloc[-2], zl_cl.iloc[-1]
         prev_ha, curr_ha = zl_ha.iloc[-2], zl_ha.iloc[-1]
 
         clean_symbol = symbol.replace(".IS", "")
 
-        is_new_buy = (prev_cl < prev_ha) and (curr_cl > curr_ha)
-        is_new_sell = (prev_cl > prev_ha) and (curr_cl < curr_ha)
+        # EREGL Ağustos'ta kestiği için Ağustos ayında (prev) zaten sarı kırmızının ALTINDAYDI.
+        # Eylül ayında (curr) da ALTINDA kalmaya devam etti.
+        # Dolayısıyla prev_cl > prev_ha şartı SAĞLANMAYACAK ve EREGL elenecektir.
+        is_new_buy = (prev_cl <= prev_ha) and (curr_cl > curr_ha)
+        is_new_sell = (prev_cl >= prev_ha) and (curr_cl < curr_ha)
 
         if is_new_buy:
             al_listesi.append(clean_symbol)
@@ -129,7 +135,7 @@ sat_str = ", ".join(sat_listesi) if sat_listesi else "Yok"
 
 message = (
     "📅 *AYLIK SKARADAG BİST TARAMASI*\n"
-    "_(Günlükten Çevrilmiş Kesin Kesişim)_\n\n"
+    "_(Net Taze Kesişim Verenler)_\n\n"
     f"🟢 *AYLIK AL Verenler ({len(al_listesi)}):*\n`{al_str}`\n\n"
     f"🔴 *AYLIK SAT Verenler ({len(sat_listesi)}):*\n`{sat_str}`"
 )

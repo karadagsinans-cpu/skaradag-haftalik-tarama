@@ -4,7 +4,6 @@ import pandas as pd
 import numpy as np
 import requests
 
-# --- 1. TELEGRAM BİLDİRİM FONKSİYONU ---
 def send_telegram_message(message):
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
@@ -25,7 +24,6 @@ def send_telegram_message(message):
     except Exception as e:
         print(f"Telegram mesajı gönderilirken hata: {e}")
 
-# --- 2. TRADINGVIEW BİREBİR SKARADAG HESAPLAMASI ---
 def calculate_tema(series, length=16):
     ema1 = series.ewm(span=length, adjust=False).mean()
     ema2 = ema1.ewm(span=length, adjust=False).mean()
@@ -33,13 +31,11 @@ def calculate_tema(series, length=16):
     return 3 * (ema1 - ema2) + ema3
 
 def calculate_skaradag(df, avg1=16, avg2=16):
-    # Skaradag1 (Typical Price Tabanlı ZL-TEMA)
     typical_price = (df['High'] + df['Low'] + df['Close']) / 3
     tma1_1 = calculate_tema(typical_price, avg1)
     tma2_1 = calculate_tema(tma1_1, avg1)
     zl_cl = 2 * tma1_1 - tma2_1
 
-    # Skaradag2 (TradingView Heikin Ashi Birebir Hesaplaması)
     o = df['Open'].values
     h = df['High'].values
     l = df['Low'].values
@@ -64,7 +60,6 @@ def calculate_skaradag(df, avg1=16, avg2=16):
 
     return zl_cl, zl_ha
 
-# --- 3. XU100 VE ENDEKS LİSTESİ ---
 def get_bist100_symbols():
     try:
         url = "https://tr.wikipedia.org/wiki/BIST_100"
@@ -82,7 +77,6 @@ def get_bist100_symbols():
     endeksler = ["XU100.IS", "XU030.IS"]
     return endeksler + [s for s in symbols if s not in endeksler]
 
-# --- 4. TARAMA MOTORU (GÜNLÜK - TAZE KESİŞİM) ---
 symbols = get_bist100_symbols()
 al_listesi = []
 sat_listesi = []
@@ -103,9 +97,9 @@ for symbol in symbols:
 
         clean_symbol = symbol.replace(".IS", "")
 
-        # SADECE O BARDA İLK DEFA ÇAPRAZ KESENLER
-        is_new_buy = (prev_cl <= prev_ha) and (curr_cl > curr_ha)
-        is_new_sell = (prev_cl >= prev_ha) and (curr_cl < curr_ha)
+        # KESİN NET ÇAPRAZ KESİŞİM (TEMASLAR VE EŞİTLİKLER ELENDİ)
+        is_new_buy = (prev_cl < prev_ha) and (curr_cl > curr_ha)
+        is_new_sell = (prev_cl > prev_ha) and (curr_cl < curr_ha)
 
         if is_new_buy:
             al_listesi.append(clean_symbol)
@@ -115,13 +109,12 @@ for symbol in symbols:
     except Exception as e:
         print(f"{symbol} hata: {e}")
 
-# --- 5. TELEGRAM MESAJ FORMATI VE GÖNDERİMİ ---
 al_str = ", ".join(al_listesi) if al_listesi else "Yok"
 sat_str = ", ".join(sat_listesi) if sat_listesi else "Yok"
 
 message = (
     "🔔 *GÜNLÜK SKARADAG BİST TARAMASI*\n"
-    "_(Taze Kesişim Verenler)_\n\n"
+    "_(Net Taze Kesişim Verenler)_\n\n"
     f"🟢 *GÜNLÜK AL Verenler ({len(al_listesi)}):*\n`{al_str}`\n\n"
     f"🔴 *GÜNLÜK SAT Verenler ({len(sat_listesi)}):*\n`{sat_str}`"
 )

@@ -1,10 +1,10 @@
-name: Skaradag Aylik BIST Taramasi
+name: Skaradag Aylik Canli BIST Taramasi
 
 on:
   schedule:
-    # Her ayın 1'inde UTC 02:00 (Türkiye saati ile Sabah 05:00)
-    - cron: '0 2 1 * *'
-  workflow_dispatch: # İstenildiği an elle de çalıştırılabilmesi için
+    # Hafta içi her gün UTC 15:45 (TSİ 18:45 - Akşam Kapanış Taraması)
+    - cron: '45 15 * * 1-5'
+  workflow_dispatch:
 
 jobs:
   run-monthly-scanner:
@@ -24,7 +24,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Aylık Skaradag Taramasını Çalıştır
+      - name: Aylık Canlı Skaradag Taramasını Çalıştır
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}

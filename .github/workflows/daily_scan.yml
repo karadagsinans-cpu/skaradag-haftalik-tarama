@@ -2,8 +2,8 @@ name: Skaradag Gunluk BIST Taramasi
 
 on:
   schedule:
-    # Hafta içi her gün UTC 15:30 (Türkiye saati ile Akşam 18:30)
-    - cron: '30 15 * * 1-5'
+    # Hafta içi her gün UTC 15:45 (TSİ 18:45 - Akşam Kapanış Taraması)
+    - cron: '45 15 * * 1-5'
   workflow_dispatch:
 
 jobs:

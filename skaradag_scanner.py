@@ -80,21 +80,22 @@ def get_bist100_symbols():
     endeksler = ["XU100.IS", "XU030.IS"]
     return endeksler + [s for s in symbols if s not in endeksler]
 
-# --- 4. TARAMA MOTORU (CANLI HAFTALIK TARAMA) ---
+# --- 4. TARAMA MOTORU (NET TAZE HAFTALIK KESİŞİM) ---
 symbols = get_bist100_symbols()
 al_listesi = []
 sat_listesi = []
 
 for symbol in symbols:
     try:
-        # Günlük veriyi çekip Cuma günü ile biten haftalık barlara birleştiriyoruz
-        df_daily = yf.download(symbol, period="2y", interval="1d", auto_adjust=False, progress=False)
-        if len(df_daily) < 40:
+        # Günlük veri çekip haftalık mumlara birleştiriyoruz
+        df_daily = yf.download(symbol, period="5y", interval="1d", auto_adjust=False, progress=False)
+        if len(df_daily) < 60:
             continue
             
         if isinstance(df_daily.columns, pd.MultiIndex):
             df_daily.columns = df_daily.columns.get_level_values(0)
 
+        # Cuma günleri baz alınarak haftalık barlar resample edilir
         data = df_daily.resample('W-FRI').agg({
             'Open': 'first',
             'High': 'max',
@@ -108,8 +109,8 @@ for symbol in symbols:
 
         zl_cl, zl_ha = calculate_skaradag(data)
 
-        # prev: Geçen haftanın kapanmış barı
-        # curr: İçinde bulunduğumuz haftanın anlık gün sonu kapanış değeri
+        # prev: Bir önceki kapanmış hafta (Tamamlanmış bar)
+        # curr: İçinde bulunduğumuz bu haftanın anlık canlı mumu
         prev_cl = float(zl_cl.iloc[-2])
         curr_cl = float(zl_cl.iloc[-1])
         prev_ha = float(zl_ha.iloc[-2])
@@ -120,7 +121,9 @@ for symbol in symbols:
         diff_prev = prev_cl - prev_ha
         diff_curr = curr_cl - curr_ha
 
-        # CANLI HAFTA İÇİNDE İLK DEFA TAZE KESİŞİM YAPANLAR
+        # SADECE BU HAFTA İÇİNDE İLK DEFA ÇAPRAZ KESENLER
+        # TUPRS geçen hafta kestiği için geçen hafta (prev) zaten diff_prev < 0 durumundaydı.
+        # Dolayısıyla diff_prev >= 0 şartını SAĞLAMAYACAK ve elenecektir.
         is_new_buy = (diff_prev <= 0) and (diff_curr > 0)
         is_new_sell = (diff_prev >= 0) and (diff_curr < 0)
 
@@ -137,8 +140,8 @@ al_str = ", ".join(al_listesi) if al_listesi else "Yok"
 sat_str = ", ".join(sat_listesi) if sat_listesi else "Yok"
 
 message = (
-    "📊 *CANLI HAFTALIK SKARADAG BİST TARAMASI (18:45)*\n"
-    "_(Bugün İtibarıyla Haftalık Kesişim Verenler)_\n\n"
+    "📊 *CANLI HAFTALIK SKARADAG BİST TARAMASI*\n"
+    "_(Sadece Bu Hafta Taze Kesişenler)_\n\n"
     f"🟢 *HAFTALIK AL Verenler ({len(al_listesi)}):*\n`{al_str}`\n\n"
     f"🔴 *HAFTALIK SAT Verenler ({len(sat_listesi)}):*\n`{sat_str}`"
 )

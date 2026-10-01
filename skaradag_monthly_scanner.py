@@ -3,7 +3,6 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import requests
-from datetime import datetime
 
 # --- 1. TELEGRAM BİLDİRİM FONKSİYONU ---
 def send_telegram_message(message):
@@ -81,31 +80,36 @@ def get_bist100_symbols():
     endeksler = ["XU100.IS", "XU030.IS"]
     return endeksler + [s for s in symbols if s not in endeksler]
 
-# --- 4. TARAMA MOTORU (AYLIK - TAM UYUMLU TAZE KESİŞİM) ---
+# --- 4. TARAMA MOTORU (CANLI AY GÜN SONU TARAMASI) ---
 symbols = get_bist100_symbols()
 al_listesi = []
 sat_listesi = []
 
-first_day_of_current_month = pd.Timestamp(datetime.now().year, datetime.now().month, 1)
-
 for symbol in symbols:
     try:
-        data = yf.download(symbol, period="10y", interval="1mo", auto_adjust=False, progress=False)
-        if len(data) < 30:
+        # Günlük veriyi çekip gün sonu kapanışı dahil canlı aylık barlara dönüştürüyoruz
+        df_daily = yf.download(symbol, period="5y", interval="1d", auto_adjust=False, progress=False)
+        if len(df_daily) < 60:
             continue
-        
-        if isinstance(data.columns, pd.MultiIndex):
-            data.columns = data.columns.get_level_values(0)
+            
+        if isinstance(df_daily.columns, pd.MultiIndex):
+            df_daily.columns = df_daily.columns.get_level_values(0)
 
-        # Sadece bu aydan önce kapanmış tamamlanmış ayları alıyoruz
-        data = data[data.index < first_day_of_current_month]
+        data = df_daily.resample('ME').agg({
+            'Open': 'first',
+            'High': 'max',
+            'Low': 'min',
+            'Close': 'last',
+            'Volume': 'sum'
+        }).dropna()
 
         if len(data) < 20:
             continue
 
         zl_cl, zl_ha = calculate_skaradag(data)
 
-        # Değerleri tam float tipine çevirerek tip çakışması hatasını önlüyoruz
+        # prev: Geçen ayki tamamlanmış kapanış
+        # curr: İçinde bulunduğumuz ayın bugünkü gün sonı kapanış değeri
         prev_cl = float(zl_cl.iloc[-2])
         curr_cl = float(zl_cl.iloc[-1])
         prev_ha = float(zl_ha.iloc[-2])
@@ -113,9 +117,12 @@ for symbol in symbols:
 
         clean_symbol = symbol.replace(".IS", "")
 
-        # SADECE SON KAPANAN AYDA İLK DEFA TAZE KESİŞİM YAPANLAR
-        is_new_buy = (prev_cl <= prev_ha) and (curr_cl > curr_ha)
-        is_new_sell = (prev_cl >= prev_ha) and (curr_cl < curr_ha)
+        diff_prev = prev_cl - prev_ha
+        diff_curr = curr_cl - curr_ha
+
+        # CANLI AY İÇİNDE TAZE KESİŞİM YAPANLAR
+        is_new_buy = (diff_prev <= 0) and (diff_curr > 0)
+        is_new_sell = (diff_prev >= 0) and (diff_curr < 0)
 
         if is_new_buy:
             al_listesi.append(clean_symbol)
@@ -130,8 +137,8 @@ al_str = ", ".join(al_listesi) if al_listesi else "Yok"
 sat_str = ", ".join(sat_listesi) if sat_listesi else "Yok"
 
 message = (
-    "📅 *AYLIK SKARADAG BİST TARAMASI*\n"
-    "_(Net Taze Kesişim Verenler)_\n\n"
+    "📅 *CANLI AYLIK SKARADAG BİST TARAMASI (18:45)*\n"
+    "_(Bugün İtibarıyla Aylık Kesişim Verenler)_\n\n"
     f"🟢 *AYLIK AL Verenler ({len(al_listesi)}):*\n`{al_str}`\n\n"
     f"🔴 *AYLIK SAT Verenler ({len(sat_listesi)}):*\n`{sat_str}`"
 )

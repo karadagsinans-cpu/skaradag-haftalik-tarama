@@ -1,0 +1,31 @@
+name: ADX Gunluk Strateji Taramasi
+
+on:
+  schedule:
+    # Hafta içi her gün UTC 15:45 (TSİ 18:45 - Akşam Kapanış Taraması)
+    - cron: '45 15 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  run-adx-scanner:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Depoyu Klonla
+        uses: actions/checkout@v4
+
+      - name: Python Kurulumu
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Paketleri Yükle
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: ADX Taramasını Çalıştır
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python adx_scanner.py

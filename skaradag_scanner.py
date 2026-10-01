@@ -21,7 +21,7 @@ def send_telegram_message(message):
     }
     try:
         requests.post(url, json=payload)
-        print("Aylık Telegram bildirimi gönderildi.")
+        print("Haftalık Telegram bildirimi gönderildi.")
     except Exception as e:
         print(f"Telegram mesajı gönderilirken hata: {e}")
 
@@ -80,22 +80,22 @@ def get_bist100_symbols():
     endeksler = ["XU100.IS", "XU030.IS"]
     return endeksler + [s for s in symbols if s not in endeksler]
 
-# --- 4. TARAMA MOTORU (MÜKEMMEL TAZE KESİŞİM FİLTRESİ) ---
+# --- 4. TARAMA MOTORU (CANLI HAFTALIK TARAMA) ---
 symbols = get_bist100_symbols()
 al_listesi = []
 sat_listesi = []
 
 for symbol in symbols:
     try:
-        df_daily = yf.download(symbol, period="5y", interval="1d", auto_adjust=False, progress=False)
-        if len(df_daily) < 100:
+        # Günlük veriyi çekip Cuma günü ile biten haftalık barlara birleştiriyoruz
+        df_daily = yf.download(symbol, period="2y", interval="1d", auto_adjust=False, progress=False)
+        if len(df_daily) < 40:
             continue
             
         if isinstance(df_daily.columns, pd.MultiIndex):
             df_daily.columns = df_daily.columns.get_level_values(0)
 
-        # Günlük veriyi Aylık (Month-End) barlara birleştiriyoruz
-        data = df_daily.resample('ME').agg({
+        data = df_daily.resample('W-FRI').agg({
             'Open': 'first',
             'High': 'max',
             'Low': 'min',
@@ -103,29 +103,30 @@ for symbol in symbols:
             'Volume': 'sum'
         }).dropna()
 
-        # Henüz tamamlanmamış içinde bulunduğumuz ayı dışarıda bırakıyoruz
-        if len(data) > 1:
-            data = data.iloc[:-1]
-
         if len(data) < 20:
             continue
 
         zl_cl, zl_ha = calculate_skaradag(data)
 
-        # TAZE KESİŞİM MATEMATİĞİ (CROSSOVER / CROSSUNDER)
-        # Önceki bar (t-1) ve Şimdiki bar (t)
-        zl_cl_prev = zl_cl.shift(1)
-        zl_ha_prev = zl_ha.shift(1)
-
-        # Sadece son tamamlanan barda gerçekleşen taze kırılım
-        buy_cross = (zl_cl_prev <= zl_ha_prev) & (zl_cl > zl_ha)
-        sell_cross = (zl_cl_prev >= zl_ha_prev) & (zl_cl < zl_ha)
+        # prev: Geçen haftanın kapanmış barı
+        # curr: İçinde bulunduğumuz haftanın anlık gün sonu kapanış değeri
+        prev_cl = float(zl_cl.iloc[-2])
+        curr_cl = float(zl_cl.iloc[-1])
+        prev_ha = float(zl_ha.iloc[-2])
+        curr_ha = float(zl_ha.iloc[-1])
 
         clean_symbol = symbol.replace(".IS", "")
 
-        if buy_cross.iloc[-1]:
+        diff_prev = prev_cl - prev_ha
+        diff_curr = curr_cl - curr_ha
+
+        # CANLI HAFTA İÇİNDE İLK DEFA TAZE KESİŞİM YAPANLAR
+        is_new_buy = (diff_prev <= 0) and (diff_curr > 0)
+        is_new_sell = (diff_prev >= 0) and (diff_curr < 0)
+
+        if is_new_buy:
             al_listesi.append(clean_symbol)
-        elif sell_cross.iloc[-1]:
+        elif is_new_sell:
             sat_listesi.append(clean_symbol)
 
     except Exception as e:
@@ -136,10 +137,10 @@ al_str = ", ".join(al_listesi) if al_listesi else "Yok"
 sat_str = ", ".join(sat_listesi) if sat_listesi else "Yok"
 
 message = (
-    "📅 *AYLIK SKARADAG BİST TARAMASI*\n"
-    "_(Sadece Sinyalin Geldiği İlk Bar - Taze Kesişim)_\n\n"
-    f"🟢 *AYLIK AL Verenler ({len(al_listesi)}):*\n`{al_str}`\n\n"
-    f"🔴 *AYLIK SAT Verenler ({len(sat_listesi)}):*\n`{sat_str}`"
+    "📊 *CANLI HAFTALIK SKARADAG BİST TARAMASI (18:45)*\n"
+    "_(Bugün İtibarıyla Haftalık Kesişim Verenler)_\n\n"
+    f"🟢 *HAFTALIK AL Verenler ({len(al_listesi)}):*\n`{al_str}`\n\n"
+    f"🔴 *HAFTALIK SAT Verenler ({len(sat_listesi)}):*\n`{sat_str}`"
 )
 
 send_telegram_message(message)
